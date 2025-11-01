@@ -63,7 +63,7 @@ static void setup_groups(struct root_profile *profile, struct cred *cred)
 	put_group_info(group_info);
 }
 
-static void disable_seccomp()
+void disable_seccomp()
 {
 	struct task_struct fake;
 	// Refer to kernel/seccomp.c: seccomp_set_mode_strict
