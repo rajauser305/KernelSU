@@ -1,7 +1,13 @@
+#include <linux/version.h>
 #include <linux/capability.h>
 #include <linux/cred.h>
 #include <linux/sched.h>
-#include <linux/sched/signal.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 10, 0)
+#include <linux/sched/signal.h> // signal_struct
+#include <linux/sched/task.h>
+#else
+#include <linux/sched.h>
+#endif
 #include <linux/seccomp.h>
 #include <linux/thread_info.h>
 #include <linux/uidgid.h>
@@ -13,6 +19,7 @@
 #include "selinux/selinux.h"
 #include "su_mount_ns.h"
 #include "sucompat.h"
+#include "kernel_compat.h"
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION (6, 7, 0)
 static struct group_info root_groups = { .usage = REFCOUNT_INIT(2) };
@@ -52,7 +59,11 @@ static void setup_groups(struct root_profile *profile, struct cred *cred)
 			put_group_info(group_info);
 			return;
 		}
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 9, 0)
 		group_info->gid[i] = kgid;
+#else
+		GROUP_AT(group_info, i) = kgid;
+#endif
 	}
 
 	groups_sort(group_info);
@@ -76,9 +87,14 @@ static void disable_seccomp()
 	memcpy(&fake, current, sizeof(fake));
 	current->seccomp.mode = 0;
 	current->seccomp.filter = NULL;
+
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 	atomic_set(&current->seccomp.filter_count, 0);
+#endif
+
 	spin_unlock_irq(&current->sighand->siglock);
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 11, 0)
 	// https://github.com/torvalds/linux/commit/bfafe5efa9754ebc991750da0bcca2a6694f3ed3#diff-45eb79a57536d8eccfc1436932f093eb5c0b60d9361c39edb46581ad313e8987R576-R577
 	fake.flags |= PF_EXITING;
@@ -86,8 +102,8 @@ static void disable_seccomp()
 	// https://github.com/torvalds/linux/commit/0d8315dddd2899f519fe1ca3d4d5cdaf44ea421e#diff-45eb79a57536d8eccfc1436932f093eb5c0b60d9361c39edb46581ad313e8987R556-R558
 	fake.sighand = NULL;
 #endif
-
 	seccomp_filter_release(&fake);
+#endif // 5.9
 }
 
 void escape_with_root_profile(void)
