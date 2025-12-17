@@ -43,11 +43,11 @@ static const struct ksu_feature_handler kernel_umount_handler = {
 
 extern int path_umount(struct path *path, int flags);
 
-static void ksu_umount_mnt(struct path *path, int flags)
+static inline void ksu_umount_mnt(const char *mnt, struct path *path, int flags)
 {
     int err = path_umount(path, flags);
     if (err) {
-        pr_info("umount %s failed: %d\n", path->dentry->d_iname, err);
+        pr_info("umount %s failed: %d\n", mnt, err);
     }
 }
 
@@ -65,7 +65,7 @@ static void try_umount(const char *mnt, int flags)
         return;
     }
 
-    ksu_umount_mnt(&path, flags);
+    ksu_umount_mnt(mnt, &path, flags);
 }
 
 struct umount_tw {
