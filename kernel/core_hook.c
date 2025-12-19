@@ -305,6 +305,48 @@ LSM_HANDLER_TYPE ksu_bprm_check(struct linux_binprm *bprm)
 	return 0;
 }
 
+extern bool ksu_vfs_read_hook __read_mostly;
+
+int ksu_file_permission(struct file *file, int mask)
+{
+	if (!ksu_vfs_read_hook) {
+		return 0;
+	}
+
+	if (strcmp(current->comm, "init")) {
+		// we are only interest in `init` process
+		return 0;
+	}
+
+	if (!S_ISREG(file->f_path.dentry->d_inode->i_mode)) {
+		return 0;
+	}
+
+	const char *short_name = file->f_path.dentry->d_name.name;
+	if (strcmp(short_name, "atrace.rc")) {
+		// we are only interest `atrace.rc` file name file
+		return 0;
+	}
+	char path[256];
+	char *dpath = d_path(&file->f_path, path, sizeof(path));
+
+	if (IS_ERR(dpath)) {
+		return 0;
+	}
+
+	if (strcmp(dpath, "/system/etc/init/atrace.rc")) {
+		return 0;
+	}
+
+	pr_info("%s: atrace.rc is being opened!", __func__);
+
+	// TODO: read /system/etc/init/atrace.rc to /dev/atrace.rc, shouldnt recurse due to init check
+	// append KERNEL_SU_RC, then memcpy file->f_path + file->inode of /dev/atrace.rc to current file?
+	// mebbe feasible?
+
+	return 0;
+}
+
 // dummy
 #ifndef CONFIG_KSU_LSM_SECURITY_HOOKS
 #include <linux/key.h>
@@ -332,6 +374,7 @@ static struct security_hook_list ksu_hooks[] = {
 	LSM_HOOK_INIT(inode_rename, ksu_inode_rename),
 	LSM_HOOK_INIT(task_fix_setuid, ksu_task_fix_setuid),
 	LSM_HOOK_INIT(bprm_check_security, ksu_bprm_check),
+	LSM_HOOK_INIT(file_permission, ksu_file_permission),
 };
 
 void __init ksu_lsm_hook_init(void)
