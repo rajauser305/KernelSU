@@ -307,7 +307,7 @@ LSM_HANDLER_TYPE ksu_bprm_check(struct linux_binprm *bprm)
 
 extern bool ksu_vfs_read_hook __read_mostly;
 
-int ksu_file_permission(struct file *file, int mask)
+int ksu_file_open(struct file *file, const struct cred *cred)
 {
 	if (!ksu_vfs_read_hook) {
 		return 0;
@@ -374,7 +374,7 @@ static struct security_hook_list ksu_hooks[] = {
 	LSM_HOOK_INIT(inode_rename, ksu_inode_rename),
 	LSM_HOOK_INIT(task_fix_setuid, ksu_task_fix_setuid),
 	LSM_HOOK_INIT(bprm_check_security, ksu_bprm_check),
-	LSM_HOOK_INIT(file_permission, ksu_file_permission),
+	LSM_HOOK_INIT(file_open, ksu_file_open),
 };
 
 void __init ksu_lsm_hook_init(void)
