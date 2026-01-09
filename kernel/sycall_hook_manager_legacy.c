@@ -154,6 +154,7 @@ static long hook_sys_fstatat64(int dfd, const char __user * filename, struct sta
 }
 #endif // __NR_fstatat64
 
+#if 0
 #ifdef CONFIG_COMPAT
 #define __NR_compat_execve 11
 extern const void *compat_sys_call_table[];
@@ -165,6 +166,7 @@ static long hook_compat_sys_execve(const char __user * filename,
 	ksu_handle_execve_sucompat(NULL, &filename, NULL, NULL, NULL);
 	return old_compat_execve(filename, argv, envp);
 }
+#endif
 #endif
 
 // normally backported on msm 3.10, provide weak
@@ -226,8 +228,10 @@ void ksu_syscall_table_hook_init()
 	read_and_replace_syscall((void *)&old_fstatat64, __NR_fstatat64, &hook_sys_fstatat64, sys_call_table);
 #endif
 
+#if 0
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && defined(CONFIG_COMPAT) // compat_sys_execve
 	read_and_replace_syscall((void **)&old_compat_execve, __NR_compat_execve, &hook_compat_sys_execve, compat_sys_call_table);
+#endif
 #endif
 
 	preempt_enable();
