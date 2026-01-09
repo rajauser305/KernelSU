@@ -8,6 +8,7 @@
 
 // compiles but not tested!!
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
+#error "do NOT use on 4.19 and above! likely broken."
 
 // reboot
 static syscall_fn_t old_reboot; // int magic1, int magic2, unsigned int cmd, void __user *arg
@@ -76,7 +77,7 @@ static long hook_sys_fstatat64(const struct pt_regs *regs)
 #endif // __NR_fstatat64
 
 // old_ptr is actually syscall_fn_t *
-static void read_and_replace_syscall(void *old_ptr, unsigned long syscall_nr, void *new_ptr)
+static void read_and_replace_syscall(void *old_ptr, unsigned long syscall_nr, void *new_ptr, void *unused_ptr)
 {
 	// arch/arm64/include/asm/syscall.h
 	// typedef long (*syscall_fn_t)(const struct pt_regs *regs);
@@ -153,7 +154,6 @@ static long hook_sys_fstatat64(int dfd, const char __user * filename, struct sta
 }
 #endif // __NR_fstatat64
 
-#if 0
 #ifdef CONFIG_COMPAT
 #define __NR_compat_execve 11
 extern const void *compat_sys_call_table[];
@@ -165,28 +165,18 @@ static long hook_compat_sys_execve(const char __user * filename,
 	ksu_handle_execve_sucompat(NULL, &filename, NULL, NULL, NULL);
 	return old_compat_execve(filename, argv, envp);
 }
-static void read_and_replace_compat_syscall(void **old_ptr, unsigned long syscall_nr, void *new_ptr)
-{
-	void **syscall_addr = (void **)(compat_sys_call_table + syscall_nr);
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0)
-	set_memory_rw(((unsigned long)syscall_addr), 1); // unlock whole page
-#endif
-	barrier();
-	*old_ptr = FORCE_VOLATILE(*syscall_addr);
-	barrier();
-	FORCE_VOLATILE(*syscall_addr) = new_ptr;
-	barrier();
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0)
-	set_memory_ro(((unsigned long)syscall_addr), 1); // relock it
 #endif
 
-}
-#endif
+// normally backported on msm 3.10, provide weak
+#if LINUX_VERSION_CODE < KERNEL_VERSION(3, 18, 0) 
+__weak int set_memory_ro(unsigned long addr, int numpages) { return 0; }
+__weak int set_memory_rw(unsigned long addr, int numpages) { return 0; }
 #endif
 
+// WARNING!!! void * abuse ahead! (pointer-hiding!)
 // old_ptr is actually void **
-static void read_and_replace_syscall(void *old_ptr, unsigned long syscall_nr, void *new_ptr)
+// target_table is void *target_table[];
+static void read_and_replace_syscall(void *old_ptr, unsigned long syscall_nr, void *new_ptr, void *target_table)
 {
 	// *old_ptr = READ_ONCE(*((void **)sys_call_table + syscall_nr));
 	// WRITE_ONCE(*((void **)sys_call_table + syscall_nr), new_ptr);
@@ -196,12 +186,14 @@ static void read_and_replace_syscall(void *old_ptr, unsigned long syscall_nr, vo
 	// since those are actually just forced-aligned-volatile-rw
 
 	// void **syscall_addr = (void **)(sys_call_table + syscall_nr);
-	// *(a + b) == a[b]; , a + b == &a[b];
-	void **syscall_addr = (void **)&sys_call_table[syscall_nr];
+	// sugar: *(a + b) == a[b]; , a + b == &a[b];
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0)
+	void **sctable = (void **)target_table;
+	void **syscall_addr = (void **)&sctable[syscall_nr];
+
+	// pr_info("syscall_slot: 0x%p syscall_addr: 0x%p \n", (void *)syscall_addr, (void *)*syscall_addr);	
+
 	set_memory_rw(((unsigned long)syscall_addr), 1); // unlock whole page
-#endif
 
 	barrier();
 	*(void **)old_ptr = FORCE_VOLATILE(*syscall_addr);
@@ -209,12 +201,7 @@ static void read_and_replace_syscall(void *old_ptr, unsigned long syscall_nr, vo
 	FORCE_VOLATILE(*syscall_addr) = new_ptr;
 	barrier();
 
-	// pr_info("syscall_slot: 0x%p syscall_addr: 0x%p \n", (void *)syscall_addr, (void *)*syscall_addr);	
-
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 18, 0)
 	set_memory_ro(((unsigned long)syscall_addr), 1); // relock it
-#endif
-
 	return;
 }
 #endif // 4.19+
@@ -224,27 +211,23 @@ void ksu_syscall_table_hook_init()
 	preempt_disable();
 
 	// reboot
-	read_and_replace_syscall((void *)&old_reboot, __NR_reboot, &hook_sys_reboot);
+	read_and_replace_syscall((void *)&old_reboot, __NR_reboot, &hook_sys_reboot, sys_call_table);
 
 	// exec
-	read_and_replace_syscall((void *)&old_execve, __NR_execve, &hook_sys_execve);
+	read_and_replace_syscall((void *)&old_execve, __NR_execve, &hook_sys_execve, sys_call_table);
 	// access
-	read_and_replace_syscall((void *)&old_faccessat, __NR_faccessat, &hook_sys_faccessat);
+	read_and_replace_syscall((void *)&old_faccessat, __NR_faccessat, &hook_sys_faccessat, sys_call_table);
 
-#ifdef __NR_newfstatat
-	// newfstatat
-	read_and_replace_syscall((void *)&old_newfstatat, __NR_newfstatat, &hook_sys_newfstatat);
+#ifdef __NR_newfstatat // newfstatat
+	read_and_replace_syscall((void *)&old_newfstatat, __NR_newfstatat, &hook_sys_newfstatat, sys_call_table);
 #endif
 
-#ifdef __NR_fstatat64
-	// newfstatat
-	read_and_replace_syscall((void *)&old_fstatat64, __NR_fstatat64, &hook_sys_fstatat64);
+#ifdef __NR_fstatat64 // fstatat64
+	read_and_replace_syscall((void *)&old_fstatat64, __NR_fstatat64, &hook_sys_fstatat64, sys_call_table);
 #endif
 
-#if 0
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && defined(CONFIG_COMPAT)
-	read_and_replace_compat_syscall((void **)&old_compat_execve, __NR_compat_execve, &hook_compat_sys_execve);
-#endif
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0) && defined(CONFIG_COMPAT) // compat_sys_execve
+	read_and_replace_syscall((void **)&old_compat_execve, __NR_compat_execve, &hook_compat_sys_execve, compat_sys_call_table);
 #endif
 
 	preempt_enable();
